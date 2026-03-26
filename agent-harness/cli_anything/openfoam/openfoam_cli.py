@@ -1145,34 +1145,64 @@ def param_run(ctx, var: str, values: str, cases_dir: str, solver: str,
     for i, val in enumerate(value_list):
         case_name = f"case_{var}_{val}"
         variant_path = sweep_root / case_name
+        container_case = f"/home/openfoam/{case_name}"
 
         # Clone base case
         import shutil
         shutil.copytree(base_case, variant_path, dirs_exist_ok=False)
 
-        # Substitute variable in all dict files
-        for dict_file in variant_path.rglob("*.dict"):
-            dp.substitute_vars(dict_file, {var: val})
-        for dict_file in variant_path.rglob("Dict"):
-            dp.substitute_vars(dict_file, {var: val})
-        # Also substitute in controlDict
-        dp.substitute_vars(variant_path / "system" / "controlDict", {var: val})
+        # Apply parameter substitution via patch_dict (works directly on dict data,
+        # no need for #VAR# placeholder text — val can be int/float/str)
+        try:
+            ctrl = dp.read_dict(variant_path / "system" / "controlDict")
+            # Find the matching key (case-insensitive lookup)
+            ctrl_patch = {}
+            for key in ctrl:
+                if key.lower() == var.lower():
+                    ctrl_patch[key] = float(val) if '.' in str(val) else int(val)
+            if ctrl_patch:
+                dp.patch_dict(variant_path / "system" / "controlDict", ctrl_patch)
+        except Exception as e:
+            warn(f"  Could not patch controlDict for {var}={val}: {e}")
 
         echo(f"\n[{i+1}/{len(value_list)}] {var}={val} → {case_name}")
 
+        # Copy to container (handle user namespace UID issue)
+        import subprocess
+        subprocess.run(
+            ["docker", "exec", "-u", "root", container,
+             "bash", "-c", f"rm -rf {container_case} && mkdir -p {container_case}"],
+            check=True, timeout=10,
+        )
+        subprocess.run(
+            ["docker", "cp", str(variant_path) + "/.", f"{container}:{container_case}"],
+            check=True, timeout=30,
+        )
+        subprocess.run(
+            ["docker", "exec", "-u", "root", container, "bash", "-c",
+             f"chmod -R a+rwX {container_case}"],
+            check=True, timeout=10,
+        )
+
         # Run blockMesh
-        r_mesh = ob.run_blockmesh(variant_path, container=container)
+        r_mesh = ob.run_blockmesh(Path(container_case), container=container)
         if not r_mesh.success:
-            warn(f"  blockMesh failed for {var}={val}: {r_mesh.error[-100:]}")
+            warn(f"  blockMesh failed: {r_mesh.error[-150:]}")
             results.append({"value": val, "case": case_name, "status": "mesh_failed",
                            "error": r_mesh.error[-200:]})
             continue
 
         # Run solver
         r_solver = ob.run_solver(
-            variant_path, solver,
+            Path(container_case), solver,
             parallel=False,
             container=container,
+        )
+
+        # Copy results back to host
+        subprocess.run(
+            ["docker", "cp", f"{container}:{container_case}/.", str(variant_path) + "/."],
+            check=True, timeout=30,
         )
 
         residuals = ob.parse_residuals(r_solver.output)
@@ -1232,7 +1262,15 @@ def param_design(ctx, var: str, placeholder: str, case_path: str):
 
     ctrl = p / "system" / "controlDict"
     if ctrl.exists():
-        dp.substitute_vars(ctrl, {var.upper(): placeholder})
+        text = ctrl.read_text()
+        # Replace bare value with #VAR# placeholder in dict files
+        # e.g. "endTime 1000;" → "endTime #END_TIME#;"
+        # We do a simple text substitution of the value name in the file
+        import re
+        # Replace "var val;" patterns with "var #VAR#;"
+        pattern = rf'(\b{re.escape(var.upper())}\s+)(?!\#)\S+'
+        text = re.sub(pattern, rf'\g<1>{placeholder}', text)
+        ctrl.write_text(text)
 
     result = {"status": "success", "var": var, "placeholder": placeholder}
     if JSON_MODE:

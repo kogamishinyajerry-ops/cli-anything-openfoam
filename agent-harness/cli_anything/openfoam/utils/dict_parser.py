@@ -225,7 +225,23 @@ class DictParser:
         return result
 
     def parse(self):
-        """Parse tokens as a dictionary block (starting with { or bare keys)."""
+        """Parse tokens as a dictionary block (starting with { or bare keys).
+
+        Skips any leading FoamFile { ... } header block, which is the standard
+        OpenFOAM file header and not part of the actual dictionary content.
+        """
+        # Skip optional FoamFile header block: "FoamFile { ... }"
+        if (self.peek()[0] == TK_WORD and self.peek()[1] == 'FoamFile'
+                and self.peek(1)[0] == TK_LBRACE):
+            self.consume()  # consume 'FoamFile'
+            self.consume()  # consume '{'
+            depth = 1
+            while depth > 0 and not self.at_end():
+                tok = self.consume()
+                if tok[0] == TK_LBRACE:
+                    depth += 1
+                elif tok[0] == TK_RBRACE:
+                    depth -= 1
         if self.peek()[0] == TK_LBRACE:
             self.consume()
             return self.parse_block()
@@ -248,22 +264,15 @@ def write_dict(path: Path, data: dict, foam_file_header: bool = True) -> None:
     lines = []
 
     if foam_file_header:
-        lines.append("/*--------------------------------*- C++ -*----------------------------------*\\")
-        lines.append("  =========                 |")
-        lines.append("  \\\\     /  F ield         |  OpenFOAM: The Open Source CFD Toolbox")
-        lines.append("   \\\\  /   O peration     |")
-        lines.append("    \\\\/    F oamiation     |  Web: www.OpenFOAM.org")
-        lines.append("     \\/     M anagement     |")
-        lines.append("*---------------------------------------------------------------------------*/")
+        # OpenFOAM's dictionary parser does NOT handle multi-line C comments
+        # (/* */), only single-line // comments. Only emit FoamFile header.
         lines.append("FoamFile")
         lines.append("{")
-        lines.append(f"    version     2.0;")
-        lines.append(f"    format      ascii;")
-        lines.append(f"    location    \"{path.name}\";")
-        lines.append(f"    class       dictionary;")
+        lines.append("    version     2.0;")
+        lines.append("    format      ascii;")
+        lines.append("    class       dictionary;")
         lines.append(f"    object      {path.name};")
         lines.append("}")
-        lines.append("// * ************************************************************************ //")
         lines.append("")
 
     def serialize(d, indent=0):
@@ -280,18 +289,20 @@ def write_dict(path: Path, data: dict, foam_file_header: bool = True) -> None:
                     out.append(prefix + "}")
             elif isinstance(v, list):
                 inner = "  ".join(str(x) for x in v)
-                out.append(f"{prefix}{k}  ({inner});")
+                # dimensionSet uses [ ], not ( )
+                if len(v) == 7 and all(isinstance(x, (int, float)) for x in v):
+                    out.append(f"{prefix}{k}  [{inner}];")
+                else:
+                    out.append(f"{prefix}{k}  ({inner});")
             elif isinstance(v, bool):
                 out.append(f"{prefix}{k}      {'on' if v else 'off'};")
             elif isinstance(v, str):
-                if re.match(r'^\([\d.eE+-]+\s+[\d.eE+-]+\s+[\d.eE+-]+\)$', v):
-                    out.append(f"{prefix}{k}      {v};")
-                elif v.startswith(('$', '#')):
-                    out.append(f"{prefix}{k}      {v};")
-                elif re.match(r'^[a-zA-Z_]\w*$', v):
-                    out.append(f"{prefix}{k}      {v};")
-                else:
+                # OpenFOAM values are never quoted in dict files — write as-is.
+                # Only exception: strings containing semicolons or braces need quoting.
+                if ';' in v or '{' in v or '}' in v:
                     out.append(f"{prefix}{k}      \"{v}\";")
+                else:
+                    out.append(f"{prefix}{k}      {v};")
             else:
                 out.append(f"{prefix}{k}      {v};")
         return out
@@ -360,6 +371,10 @@ CASE_TEMPLATES = {
             "solvers": {
                 "p": {"solver": "PCG", "preconditioner": "DIC", "tolerance": 1e-6, "relTol": 0.05},
                 "U": {"solver": "smoothSolver", "smoother": "GaussSeidel", "tolerance": 1e-6, "relTol": 0.05},
+            },
+            "SIMPLE": {
+                "nCorrectors": 2,
+                "nNonOrthogonalCorrectors": 1,
             },
             "relaxationFactors": {
                 "fields": {"p": 0.3},
