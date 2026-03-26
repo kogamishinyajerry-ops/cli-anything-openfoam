@@ -22,6 +22,7 @@ Follows HARNESS.md:
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -1108,20 +1109,22 @@ def param_group():
 
 
 @param_group.command("run")
-@click.option("--var", required=True, help="Variable name (e.g. INLET_VELOCITY)")
+@click.option("--var", required=True, help="Variable name or dot-path (e.g. endTime or boundaryField.inlet.value)")
 @click.option("--values", required=True, help="Space-separated values (e.g. '1 5 10 20')")
+@click.option("--file", "dict_file", default="system/controlDict", help="Dict file to patch (relative to case)")
 @click.option("--cases-dir", default="./sweep", help="Directory to store sweep cases")
 @click.option("--solver", default="simpleFoam", help="Solver to run")
 @click.option("--max-cases", "-n", default=8, help="Max parallel cases")
 @click.argument("case_path", type=click.Path(exists=True), required=False)
 @click.pass_context
-def param_run(ctx, var: str, values: str, cases_dir: str, solver: str,
+def param_run(ctx, var: str, values: str, dict_file: str, cases_dir: str, solver: str,
               max_cases: int, case_path: str):
     """Run parameter sweep: clone case with each value, collect results.
 
     Example:
-      openfoam param run --var INLET_VELOCITY --values "1 5 10 20" \\
-          --cases ./sweep_results --project ./baseCase
+      openfoam param run --var endTime --values "10 50 100" --project ./baseCase
+      openfoam param run --var boundaryField.inlet.value --file 0/U \\
+          --values "uniform_(1_0_0) uniform_(5_0_0)" --project ./baseCase
     """
     global JSON_MODE
 
@@ -1143,7 +1146,10 @@ def param_run(ctx, var: str, values: str, cases_dir: str, solver: str,
     echo(f"Max parallel: {max_cases}")
 
     for i, val in enumerate(value_list):
-        case_name = f"case_{var}_{val}"
+        # Sanitize case name: only alphanumeric, underscore, dash
+        safe_var = re.sub(r'[^a-zA-Z0-9_-]', '_', var.split('.')[-1])
+        safe_val = re.sub(r'[^a-zA-Z0-9_.-]', '_', val)
+        case_name = f"case_{safe_var}_{safe_val}"
         variant_path = sweep_root / case_name
         container_case = f"/home/openfoam/{case_name}"
 
@@ -1151,19 +1157,63 @@ def param_run(ctx, var: str, values: str, cases_dir: str, solver: str,
         import shutil
         shutil.copytree(base_case, variant_path, dirs_exist_ok=False)
 
-        # Apply parameter substitution via patch_dict (works directly on dict data,
-        # no need for #VAR# placeholder text — val can be int/float/str)
+        # Apply parameter substitution via patch_dict
         try:
-            ctrl = dp.read_dict(variant_path / "system" / "controlDict")
-            # Find the matching key (case-insensitive lookup)
-            ctrl_patch = {}
-            for key in ctrl:
-                if key.lower() == var.lower():
-                    ctrl_patch[key] = float(val) if '.' in str(val) else int(val)
-            if ctrl_patch:
-                dp.patch_dict(variant_path / "system" / "controlDict", ctrl_patch)
+            target_file = variant_path / dict_file
+            data = dp.read_dict(target_file)
+
+            # Parse value: try int, then float, then string (underscores → spaces)
+            def parse_val(v):
+                try:
+                    return int(v)
+                except ValueError:
+                    pass
+                try:
+                    return float(v)
+                except ValueError:
+                    pass
+                return v.replace("_", " ")
+
+            parsed = parse_val(val)
+
+            # Support dot-path: "boundaryField.inlet.value" → nested dict update
+            keys = var.split(".")
+            if len(keys) == 1:
+                # Simple key: case-insensitive match
+                patch = {}
+                for key in data:
+                    if key.lower() == var.lower():
+                        patch[key] = parsed
+                if patch:
+                    dp.patch_dict(target_file, patch)
+            else:
+                # Nested path: walk into dict
+                node = data
+                for k in keys[:-1]:
+                    # case-insensitive lookup
+                    matched = None
+                    for dk in node:
+                        if dk.lower() == k.lower():
+                            matched = dk
+                            break
+                    if matched and isinstance(node[matched], dict):
+                        node = node[matched]
+                    else:
+                        raise KeyError(f"Path segment '{k}' not found in {target_file}")
+                # Set the leaf
+                leaf_key = keys[-1]
+                matched_leaf = None
+                for dk in node:
+                    if dk.lower() == leaf_key.lower():
+                        matched_leaf = dk
+                        break
+                if matched_leaf:
+                    node[matched_leaf] = parsed
+                else:
+                    node[leaf_key] = parsed
+                dp.write_dict(target_file, data)
         except Exception as e:
-            warn(f"  Could not patch controlDict for {var}={val}: {e}")
+            warn(f"  Could not patch {dict_file} for {var}={val}: {e}")
 
         echo(f"\n[{i+1}/{len(value_list)}] {var}={val} → {case_name}")
 
@@ -1171,7 +1221,7 @@ def param_run(ctx, var: str, values: str, cases_dir: str, solver: str,
         import subprocess
         subprocess.run(
             ["docker", "exec", "-u", "root", container,
-             "bash", "-c", f"rm -rf {container_case} && mkdir -p {container_case}"],
+             "bash", "-c", f"rm -rf '{container_case}' && mkdir -p '{container_case}'"],
             check=True, timeout=10,
         )
         subprocess.run(
@@ -1180,7 +1230,7 @@ def param_run(ctx, var: str, values: str, cases_dir: str, solver: str,
         )
         subprocess.run(
             ["docker", "exec", "-u", "root", container, "bash", "-c",
-             f"chmod -R a+rwX {container_case}"],
+             f"chmod -R a+rwX '{container_case}'"],
             check=True, timeout=10,
         )
 

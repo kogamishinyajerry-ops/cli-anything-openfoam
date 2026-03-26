@@ -205,8 +205,23 @@ class DictParser:
                     if self.peek()[0] == TK_SEMI:
                         self.consume()
                 else:
-                    # key  value;
+                    # key  value;  or  key  word (list);  (e.g. "uniform (1 0 0)")
                     val = self.parse_value()
+                    # If value is a word followed by a list, combine them
+                    # e.g. "uniform (1 0 0)" or "uniform 0"
+                    if isinstance(val, str) and self.peek()[0] == TK_LPAREN:
+                        lst = self.parse_list(TK_LPAREN, TK_RPAREN)
+                        val = val + " (" + " ".join(str(x) for x in lst) + ")"
+                    elif isinstance(val, str) and self.peek()[0] in (TK_NUMBER, TK_WORD):
+                        # e.g. "uniform 0" — word followed by number/word before ;
+                        nxt = self.peek()
+                        if nxt[0] != TK_SEMI:
+                            # Collect remaining tokens until ;
+                            parts = [val]
+                            while self.peek()[0] not in (TK_SEMI, TK_RBRACE, 'EOF'):
+                                tk = self.consume()
+                                parts.append(tk[1])
+                            val = " ".join(parts)
                     result[key] = val
                     if self.peek()[0] == TK_SEMI:
                         self.consume()
