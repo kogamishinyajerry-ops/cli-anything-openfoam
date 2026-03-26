@@ -14,6 +14,8 @@ setup(
             "cli-anything-gmsh=cli_anything.gmsh.gmsh_cli:main",
             "cli-anything-freecad=cli_anything.freecad.freecad_cli:main",
             "cli-anything-paraview=cli_anything.paraview.paraview_cli:main",
+            "cli-anything-su2=cli_anything.su2.su2_cli:main",
+            "cli-anything-dakota=cli_anything.dakota.dakota_cli:main",
         ],
     },
     python_requires=">=3.10",
