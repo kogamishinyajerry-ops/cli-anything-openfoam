@@ -363,6 +363,43 @@ def run_snappyhexmesh(
 
 
 # -------------------------------------------------------------------
+# Parallel decomposition / reconstruction
+# -------------------------------------------------------------------
+
+def run_decompose(
+    case_path: Path,
+    container: Optional[str] = None,
+) -> CommandResult:
+    """
+    Run decomposePar to split a case for parallel execution.
+
+    Requires system/decomposeParDict to exist.
+    """
+    result = _run(["decomposePar"], cwd=case_path, container=container)
+    return result
+
+
+def run_reconstruct(
+    case_path: Path,
+    time: str = "latestTime",
+    container: Optional[str] = None,
+) -> CommandResult:
+    """
+    Reconstruct a parallel case (merge processor directories into single time dirs).
+
+    Args:
+        case_path: Path to the decomposed case
+        time: Time to reconstruct ('latestTime' or specific value)
+        container: Docker container name
+    """
+    cmd = ["reconstructPar"]
+    if time != "latestTime":
+        cmd += ["-time", time]
+    result = _run(cmd, cwd=case_path, container=container)
+    return result
+
+
+# -------------------------------------------------------------------
 # Solver commands
 # -------------------------------------------------------------------
 
@@ -505,6 +542,17 @@ def get_time_dirs(case_path: Path) -> list[float]:
             except ValueError:
                 continue
     return sorted(times)
+
+
+def get_n_processors(case_path: Path) -> int:
+    """Return number of processor directories (decomposed case)."""
+    return sum(1 for d in case_path.iterdir()
+               if d.is_dir() and d.name.startswith("processor"))
+
+
+def is_decomposed(case_path: Path) -> bool:
+    """Check if case has been decomposed for parallel run."""
+    return get_n_processors(case_path) > 0
 
 
 def check_solver_converged(log_text: str, tolerance: float = 1e-5) -> bool:

@@ -140,14 +140,17 @@ def load_session(project_path: Optional[str]) -> dict:
 @click.option("--json", "json_output", is_flag=True, help="JSON output mode")
 @click.option("--project", "-p", callback=get_case_path,
               help="Case/project path (.json session or case directory)")
+@click.option("--container", "-c", default="cfd-openfoam",
+              help="Docker container name for OpenFOAM (default: cfd-openfoam)")
 @click.pass_context
-def cli(ctx, json_output: bool, project: Optional[Path]):
+def cli(ctx, json_output: bool, project: Optional[Path], container: str):
     """OpenFOAM CFD simulation CLI — mesh generation, solver execution, and post-processing."""
     global JSON_MODE
     JSON_MODE = json_output
     ctx.ensure_object(dict)
     ctx.obj["json"] = json_output
     ctx.obj["project"] = project
+    ctx.obj["container"] = container
 
     if ctx.invoked_subcommand is None:
         # Bare 'openfoam' → REPL
@@ -414,9 +417,10 @@ def mesh_generate(ctx, method: str, mesh_dict: str, geometry: str,
         sys.exit(1)
     p = p.resolve()
 
+    container = ctx.obj.get("container")
     if method == "blockmesh":
         dict_path = Path(mesh_dict) if mesh_dict else None
-        result = ob.run_blockmesh(p, dict_path)
+        result = ob.run_blockmesh(p, dict_path, container=container)
     else:
         stl = Path(geometry) if geometry else None
         result = ob.run_snappyhexmesh(
@@ -427,6 +431,7 @@ def mesh_generate(ctx, method: str, mesh_dict: str, geometry: str,
             add_layers=add_layers,
             parallel=parallel,
             n_processors=processors,
+            container=container,
         )
 
     output = {
@@ -461,7 +466,8 @@ def mesh_check(ctx, case_path: str):
         error("No case path specified")
         sys.exit(1)
 
-    result = ob.run_checkmesh(p)
+    container = ctx.obj.get("container")
+    result = ob.run_checkmesh(p, container=container)
     quality = ob.parse_checkmesh_quality(result.output) if result.output else {}
 
     output = {
@@ -722,6 +728,7 @@ def solve_run(ctx, solver: str, parallel: bool, processors: int,
         except Exception as e:
             warn(f"Could not patch controlDict: {e}")
 
+    container = ctx.obj.get("container")
     result = ob.run_solver(
         p, solver,
         parallel=parallel,
@@ -729,6 +736,7 @@ def solve_run(ctx, solver: str, parallel: bool, processors: int,
         end_time=end_time,
         delta_t=delta_t,
         detach=detach,
+        container=container,
     )
 
     # Parse output
@@ -794,6 +802,88 @@ def solve_status(ctx, case_path: str):
             warn("No time directories found — case may not have been run")
 
 
+@solve_group.command("decompose")
+@click.option("--processors", "-n", default=4, help="Number of subdomains")
+@click.option("--method", type=click.Choice(["simple", "scotch", "hierarchical"]),
+              default="simple", help="Decomposition method")
+@click.argument("case_path", type=click.Path(exists=True), required=False)
+@click.pass_context
+def solve_decompose(ctx, processors: int, method: str, case_path: str):
+    """Decompose a case for parallel execution (writes processor* dirs)."""
+    global JSON_MODE
+
+    p = Path(case_path) if case_path else ctx.obj.get("project")
+    if not p:
+        error("No case path specified")
+        sys.exit(1)
+
+    # Write decomposeParDict if not exists
+    decomp_path = p / "system" / "decomposeParDict"
+    if not decomp_path.exists():
+        coeffs = f"({processors} 1 1)"
+        dp.write_dict(decomp_path, {
+            "numberOfSubdomains": processors,
+            "method": method,
+            "simpleCoeffs": {"n": coeffs, "delta": 0.001},
+        })
+
+    container = ctx.obj.get("container")
+    result = ob.run_decompose(p, container=container)
+
+    output = {
+        "status": "success" if result.success else "error",
+        "n_processors": processors,
+        "method": method,
+        "returncode": result.returncode,
+        "output": result.output[-500:] if result.output else "",
+        "error": result.error[-300:] if result.error else "",
+    }
+
+    if JSON_MODE:
+        json_out(output)
+    else:
+        if result.success:
+            n = ob.get_n_processors(p)
+            success(f"Decomposed into {n} processor directories")
+        else:
+            error("Decomposition failed")
+            echo(result.error[-300:] if result.error else "")
+
+
+@solve_group.command("reconstruct")
+@click.option("--time", default="latestTime", help="Time to reconstruct")
+@click.argument("case_path", type=click.Path(exists=True), required=False)
+@click.pass_context
+def solve_reconstruct(ctx, time: str, case_path: str):
+    """Reconstruct a parallel case (merge processor dirs into time dirs)."""
+    global JSON_MODE
+
+    p = Path(case_path) if case_path else ctx.obj.get("project")
+    if not p:
+        error("No case path specified")
+        sys.exit(1)
+
+    container = ctx.obj.get("container")
+    result = ob.run_reconstruct(p, time=time, container=container)
+
+    output = {
+        "status": "success" if result.success else "error",
+        "time": time,
+        "returncode": result.returncode,
+        "output": result.output[-500:] if result.output else "",
+        "error": result.error[-300:] if result.error else "",
+    }
+
+    if JSON_MODE:
+        json_out(output)
+    else:
+        if result.success:
+            success(f"Reconstructed time {time}")
+        else:
+            error("Reconstruction failed")
+            echo(result.error[-300:] if result.error else "")
+
+
 @solve_group.command("stop")
 @click.argument("case_path", type=click.Path(exists=True), required=False)
 @click.pass_context
@@ -839,9 +929,10 @@ def post_extract(ctx, field: str, patch: Optional[str], operator: str,
         error("No case path specified")
         sys.exit(1)
 
+    container = ctx.obj.get("container")
     try:
         if patch:
-            value = ob.extract_patch_average(p, field, patch, time)
+            value = ob.extract_patch_average(p, field, patch, time, container=container)
         else:
             # Just check field exists at time
             latest = time == "latestTime"
@@ -868,6 +959,105 @@ def post_extract(ctx, field: str, patch: Optional[str], operator: str,
         else:
             error(str(e))
         sys.exit(1)
+
+
+@post_group.command("forces")
+@click.option("--patch", required=True, help="Patch name to extract forces on")
+@click.option("--time", default="latestTime", help="Time directory")
+@click.option("--parallel", is_flag=True, help="Case ran in parallel")
+@click.argument("case_path", type=click.Path(exists=True), required=False)
+@click.pass_context
+def post_forces(ctx, patch: str, time: str, parallel: bool, case_path: str):
+    """Extract forces and moments on a patch using the forces functionObject."""
+    global JSON_MODE
+
+    p = Path(case_path) if case_path else ctx.obj.get("project")
+    if not p:
+        error("No case path specified")
+        sys.exit(1)
+
+    container = ctx.obj.get("container")
+
+    # Write forces functionObject to controlDict if not present
+    try:
+        ctrl = dp.read_dict(p / "system" / "controlDict")
+    except Exception:
+        ctrl = {}
+
+    # Add functions section if needed
+    if "functions" not in ctrl:
+        ctrl["functions"] = {}
+
+    forces_func = {
+        "type": "forces",
+        "libs": '("libforces.so")',
+        "patches": [patch],
+        "timeStart": 0,
+        "timeEnd": 1000000,
+    }
+    ctrl["functions"][f"forces_{patch}"] = forces_func
+    dp.write_dict(p / "system" / "controlDict", ctrl)
+
+    result = ob.run_postprocess(
+        p, f"forces_{patch}", time=time, parallel=parallel, container=container
+    )
+
+    output = {
+        "status": "success" if result.success else "error",
+        "patch": patch,
+        "time": time,
+        "output": result.output[-1000:] if result.output else "",
+        "error": result.error[-500:] if result.error else "",
+    }
+
+    if JSON_MODE:
+        json_out(output)
+    else:
+        if result.success:
+            success(f"Forces extracted for patch '{patch}' at t={time}")
+            echo(result.output[-800:] if result.output else "")
+        else:
+            error("Forces extraction failed")
+            echo(result.error[-300:] if result.error else "")
+
+
+@post_group.command("residuals")
+@click.option("--field", default="U", help="Field to show residual for")
+@click.option("--time", default="latestTime", help="Time directory")
+@click.argument("case_path", type=click.Path(exists=True), required=False)
+@click.pass_context
+def post_residuals(ctx, field: str, time: str, case_path: str):
+    """Parse and display solver residuals from log output."""
+    global JSON_MODE
+
+    p = Path(case_path) if case_path else ctx.obj.get("project")
+    if not p:
+        error("No case path specified")
+        sys.exit(1)
+
+    # Read from the latest log file or parse from output
+    log_file = p / "log." + ctx.obj.get("last_solver", "simpleFoam")
+    residuals = {}
+    if log_file.exists():
+        text = log_file.read_text()
+        residuals = ob.parse_residuals(text)
+
+    result_data = {
+        "field": field,
+        "time": time,
+        "residuals": residuals,
+    }
+
+    if JSON_MODE:
+        json_out(result_data)
+    else:
+        if residuals:
+            success(f"Residuals for {field}:")
+            for name, val in residuals.items():
+                echo(f"  {name}: {val:.6e}")
+        else:
+            warn("No residuals found in log file")
+            echo("Run solver with log output to capture residuals")
 
 
 @post_group.command("fields")
@@ -908,8 +1098,147 @@ def post_fields(ctx, time: str, case_path: str):
 
 
 # -------------------------------------------------------------------
-# Helper functions
+# param group (parameter sweep)
 # -------------------------------------------------------------------
+
+@cli.group("param")
+def param_group():
+    """Parameter sweep: run cases with varying parameters."""
+    pass
+
+
+@param_group.command("run")
+@click.option("--var", required=True, help="Variable name (e.g. INLET_VELOCITY)")
+@click.option("--values", required=True, help="Space-separated values (e.g. '1 5 10 20')")
+@click.option("--cases-dir", default="./sweep", help="Directory to store sweep cases")
+@click.option("--solver", default="simpleFoam", help="Solver to run")
+@click.option("--max-cases", "-n", default=8, help="Max parallel cases")
+@click.argument("case_path", type=click.Path(exists=True), required=False)
+@click.pass_context
+def param_run(ctx, var: str, values: str, cases_dir: str, solver: str,
+              max_cases: int, case_path: str):
+    """Run parameter sweep: clone case with each value, collect results.
+
+    Example:
+      openfoam param run --var INLET_VELOCITY --values "1 5 10 20" \\
+          --cases ./sweep_results --project ./baseCase
+    """
+    global JSON_MODE
+
+    p = Path(case_path) if case_path else ctx.obj.get("project")
+    if not p:
+        error("No case path specified")
+        sys.exit(1)
+
+    base_case = p.resolve()
+    sweep_root = Path(cases_dir).resolve()
+    sweep_root.mkdir(parents=True, exist_ok=True)
+
+    container = ctx.obj.get("container")
+    value_list = values.split()
+    results = []
+
+    echo(f"Running parameter sweep: {var} = {value_list}")
+    echo(f"Base case: {base_case}  →  {sweep_root}")
+    echo(f"Max parallel: {max_cases}")
+
+    for i, val in enumerate(value_list):
+        case_name = f"case_{var}_{val}"
+        variant_path = sweep_root / case_name
+
+        # Clone base case
+        import shutil
+        shutil.copytree(base_case, variant_path, dirs_exist_ok=False)
+
+        # Substitute variable in all dict files
+        for dict_file in variant_path.rglob("*.dict"):
+            dp.substitute_vars(dict_file, {var: val})
+        for dict_file in variant_path.rglob("Dict"):
+            dp.substitute_vars(dict_file, {var: val})
+        # Also substitute in controlDict
+        dp.substitute_vars(variant_path / "system" / "controlDict", {var: val})
+
+        echo(f"\n[{i+1}/{len(value_list)}] {var}={val} → {case_name}")
+
+        # Run blockMesh
+        r_mesh = ob.run_blockmesh(variant_path, container=container)
+        if not r_mesh.success:
+            warn(f"  blockMesh failed for {var}={val}: {r_mesh.error[-100:]}")
+            results.append({"value": val, "case": case_name, "status": "mesh_failed",
+                           "error": r_mesh.error[-200:]})
+            continue
+
+        # Run solver
+        r_solver = ob.run_solver(
+            variant_path, solver,
+            parallel=False,
+            container=container,
+        )
+
+        residuals = ob.parse_residuals(r_solver.output)
+        final_time = ob.parse_final_time(r_solver.output)
+        converged = ob.check_solver_converged(r_solver.output)
+
+        results.append({
+            "value": val,
+            "case": case_name,
+            "status": "success" if r_solver.success else "failed",
+            "final_time": final_time,
+            "converged": converged,
+            "residuals": residuals,
+            "duration_seconds": round(r_solver.duration_seconds, 2),
+        })
+
+        status_str = "✓ converged" if converged else ("✓ finished" if r_solver.success else "✗ failed")
+        echo(f"  {status_str}  t={final_time}  "
+             + ", ".join(f"{k}={v:.1e}" for k, v in list(residuals.items())[:3]))
+
+    # Write summary
+    summary_path = sweep_root / "sweep_summary.json"
+    summary_path.write_text(json.dumps({
+        "variable": var,
+        "values": value_list,
+        "base_case": str(base_case),
+        "results": results,
+    }, indent=2))
+
+    if JSON_MODE:
+        json_out({"status": "complete", "summary": str(summary_path), "results": results})
+    else:
+        echo(f"\n{'='*50}")
+        success(f"Sweep complete: {len(results)} cases")
+        echo(f"Summary: {summary_path}")
+        for r in results:
+            echo(f"  {var}={r['value']}: {r['status']} | t={r.get('final_time','?')}")
+
+
+@param_group.command("design")
+@click.option("--var", required=True, help="Variable name to add to case")
+@click.option("--placeholder", default="#VAR#", help="Placeholder in dict files")
+@click.argument("case_path", type=click.Path(exists=True), required=False)
+@click.pass_context
+def param_design(ctx, var: str, placeholder: str, case_path: str):
+    """Mark a variable as a design parameter in the case.
+
+    Adds #VAR# placeholders in controlDict endTime and writeInterval.
+    The user should replace #VAR# with their actual parameter name.
+    """
+    global JSON_MODE
+
+    p = Path(case_path) if case_path else ctx.obj.get("project")
+    if not p:
+        error("No case path specified")
+        sys.exit(1)
+
+    ctrl = p / "system" / "controlDict"
+    if ctrl.exists():
+        dp.substitute_vars(ctrl, {var.upper(): placeholder})
+
+    result = {"status": "success", "var": var, "placeholder": placeholder}
+    if JSON_MODE:
+        json_out(result)
+    else:
+        success(f"Design variable '{var}' marked with '{placeholder}' placeholder")
 
 def _is_number(s: str) -> bool:
     try:
