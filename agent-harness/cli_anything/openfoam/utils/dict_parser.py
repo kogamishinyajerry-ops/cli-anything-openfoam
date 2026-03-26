@@ -362,7 +362,11 @@ CASE_TEMPLATES = {
         "fvSchemes": {
             "ddtSchemes": {"default": "steadyState"},
             "gradSchemes": {"default": "Gauss linear"},
-            "divSchemes": {"default": "none"},
+            "divSchemes": {
+                "default": "none",
+                "div(phi,U)": "bounded Gauss linearUpwind grad(U)",
+                "div((nuEff*dev2(T(grad(U)))))": "Gauss linear",
+            },
             "laplacianSchemes": {"default": "Gauss linear corrected"},
             "interpolationSchemes": {"default": "linear"},
             "snGradSchemes": {"default": "corrected"},
@@ -375,6 +379,8 @@ CASE_TEMPLATES = {
             "SIMPLE": {
                 "nCorrectors": 2,
                 "nNonOrthogonalCorrectors": 1,
+                "pRefCell": 0,
+                "pRefValue": 0,
             },
             "relaxationFactors": {
                 "fields": {"p": 0.3},
