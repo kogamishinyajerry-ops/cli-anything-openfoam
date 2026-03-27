@@ -23,6 +23,7 @@ setup(
             "cli-anything-visit=cli_anything.visit.visit_cli:main",
             "cli-anything-ragas=cli_anything.ragas.ragas_cli:main",
             "cli-anything-lm-eval=cli_anything.lm_eval.lm_eval_cli:main",
+            "cli-anything-composio=cli_anything.composio.composio_cli:main",
         ],
     },
     python_requires=">=3.10",
