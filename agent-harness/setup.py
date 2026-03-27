@@ -19,6 +19,7 @@ setup(
             "cli-anything-starccm=cli_anything.starccm.starccm_cli:main",
             "cli-anything-xfoil=cli_anything.xfoil.xfoil_cli:main",
             "cli-anything-fluent=cli_anything.fluent.fluent_cli:main",
+            "cli-anything-tecplot=cli_anything.tecplot.tecplot_cli:main",
         ],
     },
     python_requires=">=3.10",
