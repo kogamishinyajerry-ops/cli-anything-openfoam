@@ -16,6 +16,7 @@ setup(
             "cli-anything-paraview=cli_anything.paraview.paraview_cli:main",
             "cli-anything-su2=cli_anything.su2.su2_cli:main",
             "cli-anything-dakota=cli_anything.dakota.dakota_cli:main",
+            "cli-anything-starccm=cli_anything.starccm.starccm_cli:main",
         ],
     },
     python_requires=">=3.10",
