@@ -22,6 +22,7 @@ setup(
             "cli-anything-tecplot=cli_anything.tecplot.tecplot_cli:main",
             "cli-anything-visit=cli_anything.visit.visit_cli:main",
             "cli-anything-ragas=cli_anything.ragas.ragas_cli:main",
+            "cli-anything-lm-eval=cli_anything.lm_eval.lm_eval_cli:main",
         ],
     },
     python_requires=">=3.10",
