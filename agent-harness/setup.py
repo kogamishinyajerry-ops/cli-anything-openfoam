@@ -18,6 +18,7 @@ setup(
             "cli-anything-dakota=cli_anything.dakota.dakota_cli:main",
             "cli-anything-starccm=cli_anything.starccm.starccm_cli:main",
             "cli-anything-xfoil=cli_anything.xfoil.xfoil_cli:main",
+            "cli-anything-fluent=cli_anything.fluent.fluent_cli:main",
         ],
     },
     python_requires=">=3.10",
