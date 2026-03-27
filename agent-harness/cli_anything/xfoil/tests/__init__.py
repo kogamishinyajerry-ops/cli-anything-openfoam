@@ -1,0 +1,3 @@
+"""
+XFoil tests package.
+"""
