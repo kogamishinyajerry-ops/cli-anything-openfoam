@@ -39,6 +39,9 @@ def find_su2() -> Path:
     Returns Path to /opt/su2/bin.
     Raises RuntimeError if SU2 is not found.
     """
+    if os.environ.get("SU2_MOCK"):
+        return Path("/usr/bin/true")
+
     su2_bin = Path(SU2_INSTALL)
     if not su2_bin.exists():
         raise RuntimeError(
@@ -103,6 +106,9 @@ def _run(
         CommandResult with success, output, error, returncode, duration
     """
     start = time.monotonic()
+
+    if os.environ.get("SU2_MOCK"):
+        return CommandResult(success=True, output="SU2 ran successfully (mock)", returncode=0, duration_seconds=0.0)
 
     if su2_bin is None:
         su2_bin = Path(SU2_INSTALL)
@@ -284,6 +290,9 @@ def run_cfd(
         timeout: Max seconds to run
         container: Docker container name
     """
+    if os.environ.get("SU2_MOCK"):
+        return CommandResult(success=True, output="SU2_CFD ran successfully (mock)", returncode=0)
+
     if not config.exists():
         return CommandResult(
             success=False,
@@ -319,6 +328,9 @@ def run_def(
         config: Path to SU2 config (.cfg) file
         container: Docker container name
     """
+    if os.environ.get("SU2_MOCK"):
+        return CommandResult(success=True, output="SU2_DEF ran successfully (mock)", returncode=0)
+
     if not config.exists():
         return CommandResult(
             success=False,
@@ -347,6 +359,9 @@ def run_dot(
         gradient_type: CONTINUOUS_ADJOINT or DISCRETE_ADJOINT
         container: Docker container name
     """
+    if os.environ.get("SU2_MOCK"):
+        return CommandResult(success=True, output="SU2_DOT ran successfully (mock)", returncode=0)
+
     if not config.exists():
         return CommandResult(
             success=False,
@@ -373,6 +388,9 @@ def run_geo(
         config: Path to SU2 config (.cfg) file
         container: Docker container name
     """
+    if os.environ.get("SU2_MOCK"):
+        return CommandResult(success=True, output="SU2_GEO ran successfully (mock)", returncode=0)
+
     if not config.exists():
         return CommandResult(
             success=False,
@@ -409,6 +427,9 @@ def run_shape_opt(
         timeout: Max seconds to run
         container: Docker container name
     """
+    if os.environ.get("SU2_MOCK"):
+        return CommandResult(success=True, output="SU2 shape_opt ran successfully (mock)", returncode=0)
+
     if not config.exists():
         return CommandResult(
             success=False,
@@ -458,6 +479,9 @@ def run_compute_polar(
         timeout: Max seconds to run
         container: Docker container name
     """
+    if os.environ.get("SU2_MOCK"):
+        return CommandResult(success=True, output="SU2 compute_polar ran successfully (mock)", returncode=0)
+
     if not config.exists():
         return CommandResult(
             success=False,

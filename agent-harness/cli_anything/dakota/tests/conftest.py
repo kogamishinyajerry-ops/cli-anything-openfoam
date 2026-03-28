@@ -1,2 +1,2 @@
 import os
-os.environ.setdefault("dakota_MOCK", "1")
+os.environ.setdefault("DAKOTA_MOCK", "1")

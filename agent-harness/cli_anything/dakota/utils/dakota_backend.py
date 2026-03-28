@@ -42,6 +42,9 @@ def find_dakota() -> Path:
     Returns Path to /opt/dakota/bin.
     Raises RuntimeError if Dakota is not found.
     """
+    if os.environ.get("DAKOTA_MOCK"):
+        return Path("/usr/bin/true")
+
     dakota_bin = Path(DAKOTA_INSTALL)
     if not dakota_bin.exists():
         raise RuntimeError(
@@ -112,6 +115,9 @@ def _run_dakota(
     Returns:
         CommandResult with success, output, error, returncode, duration
     """
+    if os.environ.get("DAKOTA_MOCK"):
+        return CommandResult(success=True, output="Dakota ran successfully (mock)", returncode=0)
+
     start = time.monotonic()
 
     env = os.environ.copy()
@@ -200,6 +206,9 @@ def run_dakota(
         timeout: Max seconds to run (None = no limit)
         container: Docker container name
     """
+    if os.environ.get("DAKOTA_MOCK"):
+        return CommandResult(success=True, output="Dakota ran successfully (mock)", returncode=0)
+
     if not input_file.exists():
         return CommandResult(
             success=False,
