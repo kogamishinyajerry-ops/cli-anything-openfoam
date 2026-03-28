@@ -44,14 +44,13 @@ def find_starccm() -> Path:
     Returns Path to starccm+ launcher.
     Raises RuntimeError if not found (unless STARCCM_MOCK is set).
     """
+    if os.environ.get("STARCCM_MOCK"):
+        return Path("/usr/bin/true")
+
     starccm_bin = os.environ.get("STARCCM_PATH", STARCCM_DEFAULT_INSTALL)
     bin_path = Path(starccm_bin)
 
     if not bin_path.exists():
-        if os.environ.get("STARCCM_MOCK"):
-            # For unit tests - return a fake path that will cause
-            # _run to fail gracefully when it tries to execute
-            return Path("/usr/bin/true")
         raise RuntimeError(
             f"Star-CCM+ not found at {bin_path}.\n"
             f"Set STARCCM_PATH env var or install at {STARCCM_DEFAULT_INSTALL}.\n"
