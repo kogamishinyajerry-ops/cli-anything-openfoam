@@ -39,6 +39,8 @@ setup(
             "cli-anything-elmer=cli_anything.elmer.elmer_cli:main",
             "cli-anything-fastlane=cli_anything.fastlane.fastlane_cli:main",
             "cli-anything-perforce=cli_anything.perforce.perforce_cli:main",
+            "cli-anything-gltf=cli_anything.gltf.gltf_cli:main",
+            "cli-anything-usd=cli_anything.usd.usd_cli:main",
         ],
     },
     python_requires=">=3.10",
