@@ -193,7 +193,7 @@ class TestRunScene:
         assert result.success is True
 
     def test_run_scene_missing(self, monkeypatch):
-        monkeypatch.setenv("GODOT_MOCK", "1")
+        monkeypatch.delenv("GODOT_MOCK", raising=False)
         result = gb.run_scene("/nonexistent/main.tscn")
         assert result.success is False
 

@@ -56,6 +56,9 @@ def find_godot() -> Path:
     Returns Path to godot executable.
     Raises RuntimeError if not found.
     """
+    if os.environ.get("GODOT_MOCK"):
+        return Path("/usr/bin/true")
+
     godot_bin = os.environ.get("GODOT_PATH")
 
     if not godot_bin:
@@ -80,8 +83,6 @@ def find_godot() -> Path:
             pass
 
     if not godot_bin:
-        if os.environ.get("GODOT_MOCK"):
-            return Path("/usr/bin/true")
         raise RuntimeError(
             f"Godot not found.\n"
             f"Set GODOT_PATH env var or install Godot Engine.\n"
@@ -92,8 +93,6 @@ def find_godot() -> Path:
 
     bin_path = Path(godot_bin)
     if not bin_path.exists():
-        if os.environ.get("GODOT_MOCK"):
-            return Path("/usr/bin/true")
         raise RuntimeError(f"Godot not found at {bin_path}")
 
     return bin_path
@@ -454,6 +453,9 @@ def run_scene(
     Returns:
         CommandResult
     """
+    if os.environ.get("GODOT_MOCK"):
+        return CommandResult(success=True, output="Scene run complete (mock)", returncode=0)
+
     scene = Path(scene_path).resolve()
     if not scene.exists():
         return CommandResult(
