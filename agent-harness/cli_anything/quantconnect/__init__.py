@@ -1,0 +1,1 @@
+"""QuantConnect CLI harness."""
