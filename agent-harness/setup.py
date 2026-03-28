@@ -43,7 +43,7 @@ setup(
             "cli-anything-usd=cli_anything.usd.usd_cli:main",
         ],
     },
-    python_requires=">=3.10",
+    python_requires=">=3.9",
     package_data={
         "cli_anything.openfoam": ["skills/*.md"],
     },
