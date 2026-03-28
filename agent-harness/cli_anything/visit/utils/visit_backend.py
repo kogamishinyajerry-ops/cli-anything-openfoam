@@ -39,6 +39,9 @@ def find_visit() -> Path:
     Returns Path to visit executable.
     Raises RuntimeError if not found.
     """
+    if os.environ.get("VISIT_MOCK"):
+        return Path("/usr/bin/true")
+
     candidates = [
         os.environ.get("VISIT_PATH"),
         "/usr/local/visit/bin/visit",
@@ -51,9 +54,6 @@ def find_visit() -> Path:
             p = Path(c)
             if p.exists():
                 return p
-
-    if os.environ.get("VISIT_MOCK"):
-        return Path("/usr/bin/true")
 
     raise RuntimeError(
         f"VisIt not found.\n"
