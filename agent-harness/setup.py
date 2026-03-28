@@ -25,6 +25,8 @@ setup(
             "cli-anything-lm-eval=cli_anything.lm_eval.lm_eval_cli:main",
             "cli-anything-composio=cli_anything.composio.composio_cli:main",
             "cli-anything-godot=cli_anything.godot.godot_cli:main",
+            "cli-anything-promptfoo=cli_anything.promptfoo.promptfoo_cli:main",
+            "cli-anything-ink=cli_anything.ink.ink_cli:main",
         ],
     },
     python_requires=">=3.10",
